@@ -10,7 +10,9 @@ import ru.ozh.tabs.model.Item
 import ru.surfstudio.android.easyadapter.controller.BindableItemController
 import ru.surfstudio.android.easyadapter.holder.BindableViewHolder
 
-class CategoryController : BindableItemController<Category, CategoryController.Holder>() {
+class CategoryController(
+    private val viewType: Int
+) : BindableItemController<Category, CategoryController.Holder>() {
 
     override fun createViewHolder(parent: ViewGroup): Holder {
         return Holder(parent)
@@ -18,6 +20,10 @@ class CategoryController : BindableItemController<Category, CategoryController.H
 
     override fun getItemId(data: Category): Any {
         return data.name
+    }
+
+    override fun viewType(): Int {
+        return viewType
     }
 
     override fun getItemHash(data: Category?): Any {
@@ -41,7 +47,7 @@ class ItemController : BindableItemController<Item, ItemController.Holder>() {
     }
 
     override fun getItemId(data: Item): Any {
-        return data.content
+        return data.itemName
     }
 
     override fun getItemHash(data: Item?): Any {
@@ -53,7 +59,7 @@ class ItemController : BindableItemController<Item, ItemController.Holder>() {
         private val binding: ItemItemBinding by viewBinding(ItemItemBinding::bind)
 
         override fun bind(category: Item) {
-            binding.itemNameTv.text = category.content
+            binding.itemNameTv.text = category.itemName
         }
     }
 }

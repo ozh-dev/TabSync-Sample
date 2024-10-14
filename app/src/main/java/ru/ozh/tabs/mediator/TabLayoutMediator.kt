@@ -1,189 +1,184 @@
 package ru.ozh.tabs.mediator
 
+import android.util.Log
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.LinearSmoothScroller
 import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_DRAGGING
+import androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_IDLE
+import androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_SETTLING
 import androidx.recyclerview.widget.RecyclerView.SmoothScroller
 import com.google.android.material.tabs.TabLayout
 
-/**
- * This class is made to provide the ability to sync between RecyclerView's specific items with
- * TabLayout tabs.
- *
- * @param recyclerView     The RecyclerView that is going to be synced with the TabLayout
- * @param tabLayout        The TabLayout that is going to be synced with the RecyclerView specific
- *                          items.
- */
+typealias Page = Pair<Int, Int>
+
 class TabLayoutMediator(
     private val recyclerView: RecyclerView,
     private val tabLayout: TabLayout,
+    private val tabFactory: (tab: TabLayout.Tab, position: Int) -> Unit,
+    private val indicesProvider: () -> List<Int>,
+    private val tabSelectListener: (categoryTabIndex: Int, categoryListIndex: Int) -> Unit = { categoryTabIndex: Int, categoryListIndex -> },
 ) {
 
-    var isSmoothScroll: Boolean = false
-    private var isAttached = false
-    private var indices: List<Int> = emptyList()
-    private var recyclerState = RecyclerView.SCROLL_STATE_IDLE
-    private var tabClickFlag = false
-
-    private val smoothScroller: SmoothScroller =
+    private var pagerAdapterObserver: PagerAdapterObserver? = null
+    private val smoothScroller: SmoothScroller by lazy {
         object : LinearSmoothScroller(recyclerView.context) {
             override fun getVerticalSnapPreference(): Int {
                 return SNAP_TO_START
             }
         }
+    }
 
-    private var tabViewCompositeClickListener: TabViewCompositeClickListener =
-        TabViewCompositeClickListener(tabLayout)
+    private var cellIndices: List<Int> = emptyList()
+    private var pages: List<Page> = emptyList()
+    private var tabIsClicked = false
 
-    private val onTabSelectedListener = TabSelectListener(
-        onSelected = { tab ->
-            if (!tabClickFlag) return@TabSelectListener
-
-            val position = tab.position
-
-            if (isSmoothScroll) {
-                smoothScroller.targetPosition = indices[position]
-                recyclerView.layoutManager?.startSmoothScroll(smoothScroller)
-            } else {
-                recyclerView.layoutManager?.scrollToPosition(indices[position])
-                tabClickFlag = false
-            }
-        }
-    )
+    // Поля для контроля состояния скролла
+    private var isScrollByTabClick: Boolean = false
+    private var previousScrollState = SCROLL_STATE_IDLE
+    private var scrollState = SCROLL_STATE_IDLE
+    private var chosenPage: Page? = Pair(0, 0)
 
     private val onScrollListener = RecyclerViewScrollListener(
         onStateChanged = { _, newState ->
-            recyclerState = newState
-            if (isSmoothScroll && newState == RecyclerView.SCROLL_STATE_IDLE) {
-                tabClickFlag = false
+            previousScrollState = scrollState
+            scrollState = newState
+
+            val isDraggingNow = newState == SCROLL_STATE_DRAGGING
+            val isSettlingAfterClick =
+                newState == SCROLL_STATE_SETTLING && previousScrollState == SCROLL_STATE_IDLE
+            val isSettlingAfterScroll =
+                newState == SCROLL_STATE_SETTLING && previousScrollState == SCROLL_STATE_DRAGGING
+            val isScrollFinished = newState == SCROLL_STATE_IDLE
+
+            when {
+                isDraggingNow || isSettlingAfterScroll -> {
+                    isScrollByTabClick = false
+                }
+
+                isSettlingAfterClick -> {
+                    isScrollByTabClick = true
+                }
+
+                isScrollFinished -> {
+                    isScrollByTabClick = false
+                }
             }
         },
-        onScroll = { recyclerView, dx, dy ->
-            if (tabClickFlag) {
-                return@RecyclerViewScrollListener
-            }
+        onScroll = { recyclerView, _, _ ->
+            if (isScrollByTabClick) return@RecyclerViewScrollListener
 
             val linearLayoutManager: LinearLayoutManager =
-                recyclerView.layoutManager as? LinearLayoutManager
-                    ?: error("No LinearLayoutManager attached to the RecyclerView.")
+                recyclerView.layoutManager as LinearLayoutManager
 
-            var itemPosition =
+            var firstVisibleCellIndex =
                 linearLayoutManager.findFirstCompletelyVisibleItemPosition()
 
-            if (itemPosition == -1) {
-                itemPosition =
+            if (firstVisibleCellIndex == -1) {
+                firstVisibleCellIndex =
                     linearLayoutManager.findFirstVisibleItemPosition()
             }
 
-            if (recyclerState == RecyclerView.SCROLL_STATE_DRAGGING
-                || recyclerState == RecyclerView.SCROLL_STATE_SETTLING
-            ) {
-                for (i in indices.indices) {
-                    if (itemPosition == indices[i]) {
-                        if (!tabLayout.getTabAt(i)!!.isSelected) {
-                            tabLayout.getTabAt(i)!!.select()
-                        }
-                        if (linearLayoutManager.findLastCompletelyVisibleItemPosition() == indices[indices.size - 1]) {
-                            if (!tabLayout.getTabAt(indices.size - 1)!!.isSelected) {
-                                tabLayout.getTabAt(indices.size - 1)!!.select()
-                            }
-                            return@RecyclerViewScrollListener
-                        }
+            if (isScrolling()) {
+
+                val lastVisibleCellIndex =
+                    linearLayoutManager.findLastVisibleItemPosition()
+
+                val itemCount = linearLayoutManager.itemCount
+
+                if (lastVisibleCellIndex == itemCount - 1) {
+                    selectTabBy(cellIndices.lastIndex)
+                } else {
+                    val page =
+                        pages.firstOrNull { (startPageIndex, endPageIndex) -> firstVisibleCellIndex in startPageIndex..endPageIndex }
+
+                    if (chosenPage == page) {
+                        return@RecyclerViewScrollListener
+                    }
+
+                    Log.d("TabLayoutMediator", "$this found page $page")
+                    chosenPage = page
+                    page?.let { (startPageIndex, endPageIndex) ->
+                        val categoryTabIndex = cellIndices.indexOf(startPageIndex)
+                        selectTabBy(categoryTabIndex)
+                        tabSelectListener(categoryTabIndex, startPageIndex)
                     }
                 }
             }
         }
     )
 
-    /**
-     * Calling this method will
-     */
-    fun setIndices(newIndices: List<Int>) {
-        indices = newIndices
-
-        if (isAttached) {
-            reAttach()
-        }
-    }
-
-    /**
-     * @param listener the listener the will applied on "the view" of the tab. This method is useful
-     * when attaching a click listener on the tabs of the TabLayout.
-     * Note that this method is REQUIRED in case of the need of adding a click listener on the view
-     * of a tab layout. Since the mediator uses a click flag @see TabLayoutMediator#mTabClickFlag
-     * it's taking the place of the normal on click listener, and thus the need of the composite click
-     * listener pattern, so adding listeners should be done using this method.
-     */
-    fun addOnViewOfTabClickListener(
-        listener: (tab: TabLayout.Tab, position: Int) -> Unit
-    ) {
-        tabViewCompositeClickListener.addListener(listener)
-        if (isAttached) {
-            notifyIndicesChanged()
-        }
-    }
-
-    /**
-     * Calling this method will ensure that the data that has been provided to the mediator is
-     * valid for use, and start syncing between the the RecyclerView and the TabLayout.
-     *
-     * Call this method when you have:
-     *      1- provided a RecyclerView Adapter,
-     *      2- provided a TabLayout with the appropriate number of tabs,
-     *      3- provided indices of the recyclerview items that you are syncing the tabs with. (You
-     *         need to be providing indices of at most the number of Tabs inflated in the TabLayout.)
-     */
     fun attach() {
-        recyclerView.adapter ?: error("Cannot attach with no Adapter provided to RecyclerView")
-        if (tabLayout.tabCount == 0) error("Cannot attach with no tabs provided to TabLayout")
-        if (indices.size > tabLayout.tabCount) error("Cannot attach using more indices than the available tabs")
-
-        notifyIndicesChanged()
-        isAttached = true
-    }
-
-    /**
-     * Calling this method will ensure to stop the synchronization between the RecyclerView and
-     * the TabLayout.
-     */
-    fun detach() {
-        clearListeners()
-        isAttached = false
-    }
-
-    /**
-     * This method will ensure that the synchronization is up-to-date with the data provided.
-     */
-    private fun reAttach() {
-        detach()
-        attach()
-    }
-
-    /**
-     * This method will attach the listeners required to make the synchronization possible.
-     */
-    private fun notifyIndicesChanged() {
-        tabViewCompositeClickListener.addListener { _, _ -> tabClickFlag = true }
-        tabViewCompositeClickListener.build()
-        tabLayout.addOnTabSelectedListener(onTabSelectedListener)
+        pagerAdapterObserver = PagerAdapterObserver { populateTabs() }
+        pagerAdapterObserver?.let { recyclerView.adapter?.registerAdapterDataObserver(it) }
         recyclerView.addOnScrollListener(onScrollListener)
+        populateTabs()
+
+        cellIndices = indicesProvider()
+
+        pages = cellIndices.zipWithNext { current, next ->
+            current to next - 1
+        } + (cellIndices.last() to Int.MAX_VALUE)
+
+        log("pages: $pages")
+
+        setTabsClickListener { tabIndex ->
+            log("setTabsClickListener: tabIndex: $tabIndex| isScrolling(): ${isScrolling()}")
+            if (isScrolling()) {
+                return@setTabsClickListener
+            }
+            tabIsClicked = true
+            val cellIndex = cellIndices[tabIndex]
+            tabSelectListener(tabIndex, cellIndex)
+            smoothScroller.targetPosition = cellIndex
+            recyclerView.layoutManager?.startSmoothScroll(smoothScroller)
+        }
+        selectTabBy(0)
     }
 
-
-    /**
-     * This method will ensure that any listeners that have been added by the mediator will be
-     * removed, including the one listener from
-     * @see TabLayoutMediator#addOnViewOfTabClickListener((TabLayout.Tab, int) -> Unit)
-     */
-    private fun clearListeners() {
-        recyclerView.clearOnScrollListeners()
-        for (i in 0 until tabLayout.tabCount) {
-            tabLayout.getTabAt(i)!!.view.setOnClickListener(null)
-        }
-        for (i in tabViewCompositeClickListener.getListeners().indices) {
-            tabViewCompositeClickListener.getListeners().toMutableList().removeAt(i)
-        }
-        tabLayout.removeOnTabSelectedListener(onTabSelectedListener)
+    fun detach() {
+        pagerAdapterObserver?.let { recyclerView.adapter?.unregisterAdapterDataObserver(it) }
+        pagerAdapterObserver = null
         recyclerView.removeOnScrollListener(onScrollListener)
+        tabLayout.clearOnTabSelectedListeners()
+        tabLayout.removeAllTabs()
     }
+
+    private fun selectTabBy(index: Int) {
+        if (tabLayout.getTabAt(index)?.isSelected == false) {
+            tabLayout.getTabAt(index)?.select()
+        }
+    }
+
+    private fun isScrolling(): Boolean {
+        return scrollState == SCROLL_STATE_DRAGGING
+                || scrollState == SCROLL_STATE_SETTLING
+    }
+
+    private fun populateTabs() {
+        tabLayout.removeAllTabs()
+
+        val adapter = recyclerView.adapter
+        val indicesCount: Int = indicesProvider().size
+        if (adapter != null) {
+            for (i in 0 until indicesCount) {
+                val tab = tabLayout.newTab()
+                tabFactory(tab, i)
+                tabLayout.addTab(tab, false)
+            }
+        }
+    }
+
+    private fun setTabsClickListener(onClick: (tabIndex: Int) -> Unit) {
+        tabLayout.addOnTabSelectedListener(TabSelectListener(
+            onSelected = {
+                onClick(it.position)
+            }
+        ))
+    }
+
+    private fun log(message: String) {
+        Log.d("TabLayoutMediator", "$this $message")
+    }
+
 }

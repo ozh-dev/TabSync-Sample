@@ -9,9 +9,22 @@
     tools:context=".MainActivity">
 
     <com.google.android.material.tabs.TabLayout
-        android:id="@+id/categories_layout"
+        android:id="@+id/categories_parent_layout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:clipToPadding="false"
+        android:padding="8dp"
+        android:elevation="0px"
+        android:translationZ="1px"
+        app:tabIndicatorGravity="stretch"
+        app:tabMode="scrollable"
+        app:tabPaddingEnd="0dp"
+        app:tabPaddingStart="0dp" />
+
+    <com.google.android.material.tabs.TabLayout
+        android:id="@+id/categories_child_layout"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
         android:clipToPadding="false"
         android:padding="8dp"
         android:elevation="0px"

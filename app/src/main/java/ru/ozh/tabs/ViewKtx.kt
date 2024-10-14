@@ -34,19 +34,7 @@ fun TabLayout.setTabIndicatorColor(tabCategoryIndicatorColor: Int) {
     setSelectedTabIndicator(categorySelectorDrawable)
 }
 
-fun TabLayout.Tab.setRippleColor(
-    tabCategoryIndicatorColor: Int,
-    tabCategoryIndicatorRippleColor: Int
-) {
-
-    view.replaceRipple(
-        backgroundCornerRadius = 12f.toPx,
-        backgroundColor = tabCategoryIndicatorColor,
-        rippleColor = tabCategoryIndicatorRippleColor
-    )
-}
-
-private fun View.replaceRipple(
+fun View.replaceRipple(
     backgroundCornerRadius: Float,
     @ColorInt backgroundColor: Int,
     @ColorInt rippleColor: Int,
