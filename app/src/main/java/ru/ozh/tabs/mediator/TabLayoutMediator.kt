@@ -31,7 +31,6 @@ class TabLayoutMediator(
 
     private var cellIndices: List<Int> = emptyList()
     private var pages: List<Page> = emptyList()
-    private var tabIsClicked = false
 
     // Поля для контроля состояния скролла
     private var isScrollByTabClick: Boolean = false
@@ -66,20 +65,12 @@ class TabLayoutMediator(
             }
         },
         onScroll = { recyclerView, _, _ ->
+
             if (isScrollByTabClick) return@RecyclerViewScrollListener
 
-            val linearLayoutManager: LinearLayoutManager =
-                recyclerView.layoutManager as LinearLayoutManager
-
-            var firstVisibleCellIndex =
-                linearLayoutManager.findFirstCompletelyVisibleItemPosition()
-
-            if (firstVisibleCellIndex == -1) {
-                firstVisibleCellIndex =
-                    linearLayoutManager.findFirstVisibleItemPosition()
-            }
-
             if (isScrolling()) {
+                val linearLayoutManager: LinearLayoutManager =
+                    recyclerView.layoutManager as LinearLayoutManager
 
                 val lastVisibleCellIndex =
                     linearLayoutManager.findLastVisibleItemPosition()
@@ -89,14 +80,22 @@ class TabLayoutMediator(
                 if (lastVisibleCellIndex == itemCount - 1) {
                     selectTabBy(cellIndices.lastIndex)
                 } else {
+                    var firstVisibleCellIndex =
+                        linearLayoutManager.findFirstCompletelyVisibleItemPosition()
+
+                    if (firstVisibleCellIndex == -1) {
+                        firstVisibleCellIndex =
+                            linearLayoutManager.findFirstVisibleItemPosition()
+                    }
                     val page =
-                        pages.firstOrNull { (startPageIndex, endPageIndex) -> firstVisibleCellIndex in startPageIndex..endPageIndex }
+                        pages.firstOrNull { (startPageIndex, endPageIndex) ->
+                            firstVisibleCellIndex in startPageIndex..endPageIndex
+                        }
 
                     if (chosenPage == page) {
                         return@RecyclerViewScrollListener
                     }
 
-                    Log.d("TabLayoutMediator", "$this found page $page")
                     chosenPage = page
                     page?.let { (startPageIndex, endPageIndex) ->
                         val categoryTabIndex = cellIndices.indexOf(startPageIndex)
@@ -127,7 +126,6 @@ class TabLayoutMediator(
             if (isScrolling()) {
                 return@setTabsClickListener
             }
-            tabIsClicked = true
             val cellIndex = cellIndices[tabIndex]
             tabSelectListener(tabIndex, cellIndex)
             smoothScroller.targetPosition = cellIndex
@@ -182,3 +180,6 @@ class TabLayoutMediator(
     }
 
 }
+
+
+
